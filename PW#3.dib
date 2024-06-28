@@ -33,52 +33,59 @@
 #!csharp
 
 using System;
+using System.Diagnostics;
 using System.Threading;
 
-//
-// Вычисление определенного интеграла
-//
+#!csharp
+
 class DefiniteIntegral
 {
-
-    public static double Solve(double a, double b, Func<double, double> function, double step, int threadsnumber)
+    // Многопоточная оптимизированная реализация    
+    public static double Solve(double a, double b, Func<double, double> function, double step, int threadsNumber)
     {
-        Thread[] threads = new Thread[threadsnumber];
-        double[] results = new double[threadsnumber];
-        Barrier barrier = new Barrier(threadsnumber + 1, (b) =>
-        {
-            Console.WriteLine("All threads have reached the barrier.");
-        });
+        double result = 0.0;
+        object lockObj = new object();
 
-        for (int i = 0; i < threadsnumber; i++)
+        Task[] tasks = new Task[threadsNumber];
+
+        for (int i = 0; i < threadsNumber; i++)
         {
             int threadNumber = i;
-            threads[i] = new Thread(() => ThreadMethod(ref results, barrier, threadNumber, a, b, function, step, threadsnumber));
-            threads[i].Start();
+            tasks[i] = Task.Run(() => ThreadMethod(ref result, threadNumber, a, b, function, step, threadsNumber, lockObj));
         }
 
-        barrier.SignalAndWait();
+        Task.WaitAll(tasks);
 
-        foreach(double s in results){Console.Write($"{s} ");}
-        Console.WriteLine($"\n{results.Sum()}");
-        return(results.Sum());
-        
-        static void ThreadMethod(ref double[] results, Barrier barrier, int threadNumber, double a, double b, Func<double, double> f, double step, int threadsnumber)
-        {
-            Console.WriteLine($"Calculating from {a + threadNumber*(b-a)/threadsnumber} to {a + (threadNumber+1)*(b-a)/threadsnumber}");
-            double A = a + threadNumber*(b-a)/threadsnumber;
-            double B = a + (threadNumber+1)*(b-a)/threadsnumber;
-            int n = (int)((B-A)/step);
-            double result = (f(A)/2 + Enumerable.Range(1, n-1).Select((i)=> f(A+(i*step))).Sum() + f(B)/2)*step;
-            results[threadNumber] = result;
-            barrier.SignalAndWait();
-        }
-        
+        return result;
     }
+    
+    static void ThreadMethod(ref double result, int threadNumber, double a, double b, Func<double, double> function, double step, int threadsNumber, object lockObj)
+    {
+        double A = a + threadNumber * (b - a) / threadsNumber;
+        double B = a + (threadNumber + 1) * (b - a) / threadsNumber;
+        int n = (int)((B - A) / step);
+        double subResult = (function(A) / 2 + Enumerable.Range(1, n - 1).Select(j => function(A + (j * step))).Sum() + function(B) / 2) * step;
+
+        lock (lockObj)
+        {
+            result += subResult;
+        }
+    }
+
+    // Однопоточная реализация
+    public static double Solve_1(double a, double b, Func<double, double> f, double step)
+    {
+        int n = (int)((b-a)/step);
+        return (f(a)/2 + Enumerable.Range(1, n-1).Select((i)=> f(a+(i*step))).Sum() + f(b)/2)*step;
+    }
+    
+    // Тест многопоточной отимизированной 2
+    
 }
 
 #!csharp
 
+// Тесты
 #r "nuget: xunit, 2.8.1"
 
 using Xunit;
@@ -91,3 +98,120 @@ Assert.Equal(0, DefiniteIntegral.Solve(-1, 1, X, 1e-4, 2), 1e-4);
 Assert.Equal(0, DefiniteIntegral.Solve(-1, 1, SIN, 1e-5, 8), 1e-4);
 
 Assert.Equal(50, DefiniteIntegral.Solve(0, 10, X, 1e-6, 8), 1e-5);
+
+#!csharp
+
+// Выбор оптимального шага
+Console.WriteLine("Данный блок выполняется долго в связи с тем, что интеграл с шагом 1e-6 считается продолжительное время");
+var SIN = (double x) => Math.Sin(x);
+double[] steps = new double[]{1e-1, 1e-2, 1e-3, 1e-4, 1e-5, 1e-6};
+var tests = new Dictionary<double, int>()
+{
+    { 1e-1, 0},
+    { 1e-2, 0},
+    { 1e-3, 0},
+    { 1e-4, 0},
+    { 1e-5, 0},
+    { 1e-6, 0}
+};
+TimeSpan min_ts = TimeSpan.MaxValue;
+double best_step;
+for(int i = 0; i<5; i++)
+{
+    foreach(double step in steps)
+    {
+        Stopwatch stopWatch = new Stopwatch();
+        stopWatch.Start();
+
+        double res = DefiniteIntegral.Solve_1(-100, 100, SIN, step);
+
+        stopWatch.Stop();
+
+        TimeSpan ts = stopWatch.Elapsed;
+        //Console.WriteLine(ts);
+        if(Math.Abs(res) < 1e-4)
+        {
+            //Console.WriteLine(step);
+            //Console.WriteLine(res);
+            if(ts < min_ts)
+            {
+                min_ts = ts;
+                best_step = step;
+            }
+        }
+    }
+    tests[best_step] += 1;
+    
+}
+
+Console.WriteLine($"Оптимальный шаг: {tests.First(x => x.Value == tests.Values.Max()).Key}"); // Результат расчетов - размер шага 0.1
+
+// Расчет средней продолжлительности вычислений однопоточной программы
+TimeSpan count = TimeSpan.Zero;
+for(int i = 0; i < 1000; i ++)
+{
+    Stopwatch stopWatch = new Stopwatch();
+    stopWatch.Start();
+
+    double res = DefiniteIntegral.Solve_1(-100, 100, SIN, 0.1);
+    
+    stopWatch.Stop();
+
+    TimeSpan ts = stopWatch.Elapsed;
+    count += ts;
+}
+Console.WriteLine($"Время выполнения программы в однопоточном режиме с оптимальным шагом {count.TotalMilliseconds/1000}"); // Результат замеров времени выполнения ~ 0.03 мс 
+
+#!csharp
+
+// Установка ScottPlot NuGet package
+//#r "nuget:ScottPlot, 5.0.*"
+
+// Настройка ScottPlot
+using Microsoft.DotNet.Interactive.Formatting;
+Formatter.Register(typeof(ScottPlot.Plot), (p, w) => 
+    w.Write(((ScottPlot.Plot)p).GetImageHtml(400, 300)), HtmlFormatter.MimeType);
+
+#!csharp
+
+// Выбор оптимального числа потоков
+var SIN = (double x) => Math.Sin(x);
+TimeSpan min_ts = TimeSpan.MaxValue;
+double[] dataX = new double[99];
+double[] dataY = new double[99];
+
+for(int i = 2; i < 101; i ++)
+{
+    TimeSpan count = TimeSpan.Zero;
+    for(int j = 0; j < 10000; j++)
+    {
+        Stopwatch stopWatch = new Stopwatch();
+        stopWatch.Start();
+
+        double res = DefiniteIntegral.Solve(-100, 100, SIN, 0.1, i);
+
+        stopWatch.Stop();
+        TimeSpan ts = stopWatch.Elapsed;
+        
+        count += ts;
+    }
+    dataY[i-2] = i;
+    dataX[i-2] = count.TotalMilliseconds/10000;
+    
+}
+Console.WriteLine($"Минимальное время - {dataX.Min()}, используя {Array.IndexOf(dataX, dataX.Min()) + 2} потоков"); 
+Console.WriteLine($"Прирост производительности {double.Round(0.03 / dataX.Min()*100 - 100, 2)}%"); // ~170%
+
+ScottPlot.Plot plt = new();
+plt.Add.Scatter(dataX, dataY);
+plt
+
+#!markdown
+
+**Итоги работы**
+
+Оптимальный шаг по результатам измерений: 0.1, при нем алгоритм считает интеграл правильно, также обеспечивается высокая скорость работы программы, потому что с увеличением шага уменьшается время выполнения.
+
+Оптимальное кол-во потоков, выбранное в соответствии с шагом 0.1, составило 4, усреднение числа потоков проводилось с 10000 итераций на каждое значение потоков  от 2 до 100.
+
+Среднее время выполнения однопоточной версии программы сотсавило 0.03 мс, а многопоточная ее реализация, испольщующая 4 потока выполнила вычисления за 0.01 мс, зафиксирован прирост производителтности ~180%.

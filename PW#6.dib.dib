@@ -76,7 +76,8 @@ for(int x = 0; x < 10; x ++)
 
 //BlockingCollection
 double[] BcTimeDataGlobal = new double[10];
-static ManualResetEvent threadEvent = new ManualResetEvent(false);
+static ManualResetEvent threadEvent1 = new ManualResetEvent(false);
+static ManualResetEvent threadEvent2 = new ManualResetEvent(false);
 for(int x = 0; x < 10; x ++)
 {
     var queue = new BlockingCollection<int>(new ConcurrentQueue<int>());
@@ -87,8 +88,10 @@ for(int x = 0; x < 10; x ++)
     var readerThread = new Thread(() => ReadFromQueue(queue));
     readerThread.Start();
     Console.WriteLine($"Тест #{x+1}");
+    
+    threadEvent1.Set();
+    threadEvent2.Set();
     BCglobal_sw.Start();
-    threadEvent.Set();
 
     writerThread.Join();
     readerThread.Join();
@@ -96,13 +99,14 @@ for(int x = 0; x < 10; x ++)
 
     Console.WriteLine($"Общее время обработки {BCglobal_sw.Elapsed.TotalMilliseconds}");
 
-    threadEvent.Reset();
+    threadEvent1.Reset();
+    threadEvent2.Reset();
     BcTimeDataGlobal[x] = BCglobal_sw.Elapsed.TotalMilliseconds;
 
     
     static void WriteToQueue(BlockingCollection<int> queue)
     {
-        threadEvent.WaitOne();
+        threadEvent2.WaitOne();
         var stopwatch1 = Stopwatch.StartNew();
 
         for (int i = 0; i < 1_000_000; i++)
@@ -116,14 +120,17 @@ for(int x = 0; x < 10; x ++)
 
     static void ReadFromQueue(BlockingCollection<int> queue)
     {
-        threadEvent.WaitOne();
+        threadEvent1.WaitOne();
         var stopwatch2 = Stopwatch.StartNew();
-
-        for (int i = 0; i < 1_000_000; i++)
+        int value;
+        int counter = 0;
+        while(counter < 1_000_000)
         {
-            queue.Take();
+            if(queue.TryTake(out value))
+            {
+                counter += 1;
+            }
         }
-
         stopwatch2.Stop();
         Console.WriteLine($"Время чтения из BlockingCollection: {stopwatch2.Elapsed.TotalMilliseconds}");
     }
@@ -145,8 +152,10 @@ for(int x = 0; x < 10; x ++)
     var readerThread = new Thread(() => ReadFromQueue(queue));
     readerThread.Start();
     Console.WriteLine($"Тест #{x+1}");
+
+    threadEvent1.Set();
+    threadEvent2.Set();
     CQglobal_sw.Start();
-    threadEvent.Set();
 
     writerThread.Join();
     readerThread.Join();
@@ -154,13 +163,15 @@ for(int x = 0; x < 10; x ++)
 
     Console.WriteLine($"Общее время обработки {CQglobal_sw.Elapsed.TotalMilliseconds}");
 
-    threadEvent.Reset();
+    threadEvent1.Reset();
+    threadEvent2.Reset();
+
     CqTimeDataGlobal[x] = CQglobal_sw.Elapsed.TotalMilliseconds;
 
     
     static void WriteToQueue(ConcurrentQueue<int> queue)
     {
-        threadEvent.WaitOne();
+        threadEvent2.WaitOne();
         var stopwatch1 = Stopwatch.StartNew();
 
         for (int i = 0; i < 1_000_000; i++)
@@ -174,13 +185,16 @@ for(int x = 0; x < 10; x ++)
 
     static void ReadFromQueue(ConcurrentQueue<int> queue)
     {
-        threadEvent.WaitOne();
+        threadEvent1.WaitOne();
         var stopwatch2 = Stopwatch.StartNew();
-
-        for (int i = 0; i < 1_000_000; i++)
+        int counter = 0;
+        int value;
+        while(counter < 1_000_00)
         {
-            int value;
-            queue.TryDequeue(out value);
+            if(queue.TryDequeue(out value))
+            {
+                counter += 1;
+            }
         }
 
         stopwatch2.Stop();
@@ -217,8 +231,8 @@ plt
 ## Вывод
 
 Я получил следующие значения
-- время обработки с помощью непотокобезопасной очереди ~ 15 мс
+- время обработки с помощью непотокобезопасной очереди ~ 22 мс
 - время обработки с BlockingCollection ~ 132 мс
-- время обработки с ConcurrentQueue ~ 11 мс
+- время обработки с ConcurrentQueue ~ 15 мс
 
-Обработка с помощью ConcurrentQueue быстрее обработки с непотокобезопасной очереди приблизительно на 36%
+Обработка с помощью ConcurrentQueue быстрее обработки с непотокобезопасной очереди приблизительно на 46%

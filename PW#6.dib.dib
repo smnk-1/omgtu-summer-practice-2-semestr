@@ -37,10 +37,202 @@
 Для этого следует использовать условные события, которые позволят убедиться, что оба потока запустились и готовы читать и писать объекты и только потом запускать таймер.
 2. Для итогового вывода сравнивать усредненные значения.
 
-#!markdown
+#!csharp
 
-// здесь писать код
+using System;
+using System.Threading;
+using System.Collections.Concurrent;
+using System.Diagnostics;
+
+#!csharp
+
+//Обычная очередь
+double[] SqTimeData = new double[10];
+for(int x = 0; x < 10; x ++)
+{
+    Stopwatch SQglobal_sw = new Stopwatch();
+    Stopwatch SQread_sw = new Stopwatch();
+    Stopwatch SQwrite_sw = new Stopwatch();
+    Queue<int> simple_queue = new Queue<int>();
+    SQglobal_sw.Start();
+    SQwrite_sw.Start();
+    for(int i = 0; i < 1_000_000; i ++)
+    {
+        simple_queue.Enqueue(i);
+    }
+    SQwrite_sw.Stop();
+    SQread_sw.Start();
+    for(int i = 0; i < 1_000_000; i ++)
+    {
+        int msg = simple_queue.Dequeue();
+    }
+    SQread_sw.Stop();
+    SQglobal_sw.Stop();
+    Console.WriteLine($"Обычная очередь (время записи, чтения, обработки) тест #{x+1}: {SQwrite_sw.Elapsed.TotalMilliseconds}, {SQread_sw.Elapsed.TotalMilliseconds}, {SQglobal_sw.Elapsed.TotalMilliseconds}");
+    SqTimeData[x] = SQglobal_sw.Elapsed.TotalMilliseconds;
+}
+
+#!csharp
+
+//BlockingCollection
+double[] BcTimeDataGlobal = new double[10];
+static ManualResetEvent threadEvent1 = new ManualResetEvent(false);
+static ManualResetEvent threadEvent2 = new ManualResetEvent(false);
+for(int x = 0; x < 10; x ++)
+{
+    var queue = new BlockingCollection<int>(new ConcurrentQueue<int>());
+    Stopwatch BCglobal_sw = new Stopwatch();
+
+    var writerThread = new Thread(() => WriteToQueue(queue));
+    writerThread.Start();
+    var readerThread = new Thread(() => ReadFromQueue(queue));
+    readerThread.Start();
+    Console.WriteLine($"Тест #{x+1}");
+    
+    threadEvent1.Set();
+    threadEvent2.Set();
+    BCglobal_sw.Start();
+
+    writerThread.Join();
+    readerThread.Join();
+    BCglobal_sw.Stop();
+
+    Console.WriteLine($"Общее время обработки {BCglobal_sw.Elapsed.TotalMilliseconds}");
+
+    threadEvent1.Reset();
+    threadEvent2.Reset();
+    BcTimeDataGlobal[x] = BCglobal_sw.Elapsed.TotalMilliseconds;
+
+    
+    static void WriteToQueue(BlockingCollection<int> queue)
+    {
+        threadEvent2.WaitOne();
+        var stopwatch1 = Stopwatch.StartNew();
+
+        for (int i = 0; i < 1_000_000; i++)
+        {
+            queue.Add(i);
+        }
+
+        stopwatch1.Stop();
+        Console.WriteLine($"Время записи в BlockingCollection: {stopwatch1.Elapsed.TotalMilliseconds}");
+    }
+
+    static void ReadFromQueue(BlockingCollection<int> queue)
+    {
+        threadEvent1.WaitOne();
+        var stopwatch2 = Stopwatch.StartNew();
+        int value;
+        int counter = 0;
+        while(counter < 1_000_000)
+        {
+            if(queue.TryTake(out value))
+            {
+                counter += 1;
+            }
+        }
+        stopwatch2.Stop();
+        Console.WriteLine($"Время чтения из BlockingCollection: {stopwatch2.Elapsed.TotalMilliseconds}");
+    }
+    
+}
+
+#!csharp
+
+//ConcurrentQueue
+double[] CqTimeDataGlobal = new double[10];
+static ManualResetEvent threadEvent = new ManualResetEvent(false);
+for(int x = 0; x < 10; x ++)
+{
+    var queue = new ConcurrentQueue<int>();
+    Stopwatch CQglobal_sw = new Stopwatch();
+
+    var writerThread = new Thread(() => WriteToQueue(queue));
+    writerThread.Start();
+    var readerThread = new Thread(() => ReadFromQueue(queue));
+    readerThread.Start();
+    Console.WriteLine($"Тест #{x+1}");
+
+    threadEvent1.Set();
+    threadEvent2.Set();
+    CQglobal_sw.Start();
+
+    writerThread.Join();
+    readerThread.Join();
+    CQglobal_sw.Stop();
+
+    Console.WriteLine($"Общее время обработки {CQglobal_sw.Elapsed.TotalMilliseconds}");
+
+    threadEvent1.Reset();
+    threadEvent2.Reset();
+
+    CqTimeDataGlobal[x] = CQglobal_sw.Elapsed.TotalMilliseconds;
+
+    
+    static void WriteToQueue(ConcurrentQueue<int> queue)
+    {
+        threadEvent2.WaitOne();
+        var stopwatch1 = Stopwatch.StartNew();
+
+        for (int i = 0; i < 1_000_000; i++)
+        {
+            queue.Enqueue(i);
+        }
+
+        stopwatch1.Stop();
+        Console.WriteLine($"Время записи в ConcurrentQueue: {stopwatch1.Elapsed.TotalMilliseconds}");
+    }
+
+    static void ReadFromQueue(ConcurrentQueue<int> queue)
+    {
+        threadEvent1.WaitOne();
+        var stopwatch2 = Stopwatch.StartNew();
+        int counter = 0;
+        int value;
+        while(counter < 1_000_00)
+        {
+            if(queue.TryDequeue(out value))
+            {
+                counter += 1;
+            }
+        }
+
+        stopwatch2.Stop();
+        Console.WriteLine($"Время чтения из ConcurrentQueue: {stopwatch2.Elapsed.TotalMilliseconds}");
+    }
+    
+}
+
+#!csharp
+
+// Создание графика
+
+//Установка ScottPlot NuGet package
+//#r "nuget:ScottPlot, 5.0.*"
+
+// Настройка ScottPlot
+using Microsoft.DotNet.Interactive.Formatting;
+Formatter.Register(typeof(ScottPlot.Plot), (p, w) => 
+    w.Write(((ScottPlot.Plot)p).GetImageHtml(400, 300)), HtmlFormatter.MimeType);
+
+ScottPlot.Plot plt = new();
+plt.Add.Scatter(new int[]{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}, SqTimeData);
+plt.Add.Scatter(new int[]{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}, BcTimeDataGlobal);
+plt.Add.Scatter(new int[]{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}, CqTimeDataGlobal);
+
+Console.WriteLine($"Среднее время обработки 1_000_000 значений с помощью непотокобезопасной очереди {SqTimeData.Sum()/10}");
+Console.WriteLine($"Среднее время обработки 1_000_000 значений с помощью BlockingCollection {BcTimeDataGlobal.Sum()/10}");
+Console.WriteLine($"Среднее время обработки 1_000_000 значений с помощью ConcurrentQueue {CqTimeDataGlobal.Sum()/10}");
+
+plt
 
 #!markdown
 
 ## Вывод
+
+Я получил следующие значения
+- время обработки с помощью непотокобезопасной очереди ~ 22 мс
+- время обработки с BlockingCollection ~ 132 мс
+- время обработки с ConcurrentQueue ~ 15 мс
+
+Обработка с помощью ConcurrentQueue быстрее обработки с непотокобезопасной очереди приблизительно на 46%
